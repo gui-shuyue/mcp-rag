@@ -13,31 +13,32 @@ from src.augmented.Agent import Agent
 
 async def main():
     """主测试函数"""
-    # 获取当前目录
-    current_dir = os.getcwd()
-    print(f"当前目录: {current_dir}")
-    
-    # 创建 Fetch MCP 客户端
-    fetch_mcp = MCPClient(
-        name='fetch',
-        command='uvx',
-        args=['mcp-server-fetch']
-    )
-    
-    # 创建文件系统 MCP 客户端 (对应图片中的 fileMCP)
-    file_mcp = MCPClient(
-        name='file',
-        command='npx',
-        args=['-y', '@modelcontextprotocol/server-filesystem', current_dir]
-    )
-    
-    # 创建代理实例
-    agent = Agent(
-        model='openai/gpt-4o-mini',  # 对应图片中的模型
-        mcp_clients=[fetch_mcp, file_mcp]
-    )
-    
+    agent = None
     try:
+        # 获取当前目录
+        current_dir = os.getcwd()
+        print(f"当前目录: {current_dir}")
+        
+        # 创建 Fetch MCP 客户端
+        fetch_mcp = MCPClient(
+            name='fetch',
+            command='uvx',
+            args=['mcp-server-fetch']
+        )
+        
+        # 创建文件系统 MCP 客户端 
+        file_mcp = MCPClient(
+            name='file',
+            command='npx',
+            args=['-y', '@modelcontextprotocol/server-filesystem', current_dir]
+        )
+        
+        # 创建代理实例
+        agent = Agent(
+            model='openai/gpt-4o-mini',  
+            mcp_clients=[fetch_mcp, file_mcp]
+        )
+        
         # 初始化代理
         print("正在初始化代理...")
         await agent.init()
@@ -51,18 +52,24 @@ async def main():
         print("响应结果:")
         print(response)
         
+    except asyncio.CancelledError:
+        print("操作被取消")
+        raise
     except Exception as e:
-        print(f"测试过程中出现错误: {e}")
+        print(f"发生错误: {e}")
         import traceback
         traceback.print_exc()
-    
     finally:
-        # 关闭代理连接
-        try:
-            await agent.close()
-            print("代理连接已关闭")
-        except Exception as e:
-            print(f"关闭代理时出错: {e}")
+        # 确保资源清理
+        if agent is not None:
+            try:
+                await agent.close()
+                print("代理资源已清理")
+            except Exception as e:
+                print(f"清理资源时出错: {e}")
+    
+
+
 
 
 if __name__ == "__main__":

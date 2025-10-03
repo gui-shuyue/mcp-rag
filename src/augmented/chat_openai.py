@@ -119,32 +119,23 @@ class AsyncChatOpenAI:
         if printed_llm_output:
             print()
         
-        # 修改后的代码：
-        message = {
-            "role": "assistant", 
-            "content": content,
-        }
-
-        # 🔧 只在有工具调用时才添加 tool_calls 字段
-        if tool_calls and len(tool_calls) > 0:
-            # 🔧 过滤掉空的工具调用
-            valid_tool_calls = [
-                {
-                    "type": "function",
-                    "id": tool.id,
-                    "function": {
-                        "name": tool.function.name,
-                        "arguments": tool.function.arguments,
+        self.messages.append(
+            {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "id": tc.id,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
                     }
-                }
-                for tool in tool_calls
-                if tool.id and tool.function.name  # 🔧 确保不为空
-            ]
-            
-            if valid_tool_calls:
-                message["tool_calls"] = valid_tool_calls
-
-        self.messages.append(message)
+                    for tc in tool_calls
+                ],
+            }
+        )
         
         return ChatOpenAIChatResponse(
             content=content,

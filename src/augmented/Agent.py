@@ -3,6 +3,7 @@ from utils import pretty
 from chat_openai import AsyncChatOpenAI
 from mcp_client import MCPClient
 import json
+from rich import print as rprint
 
 
 class Agent:
@@ -37,30 +38,42 @@ class Agent:
             except Exception as e:
                 print(f"Warning: Error closing MCP client {mcp_client.name}: {e}")
 
-    async def invoke(self, prompt:str):
-        if not self.llm:
-            raise ValueError("LLM not initialized. Call init() first.")
-        
-        response = await self.llm.chat(prompt=prompt, print_llm_output=True)
+    async def invoke(self, prompt: str) -> str | None:
+        # 移除自动关闭逻辑，让调用者控制生命周期
+        return await self._invoke(prompt)
+
+    async def _invoke(self, prompt: str) -> str | None:
+        if self.llm is None:
+            raise ValueError("llm not call .init()")
+        chat_resp = await self.llm.chat(prompt)
+        i = 0
         while True:
-            if len(response.tool_calls) > 0:
-                for tool_call in response.tool_calls:
-                    target_mcp_client: Optional[MCPClient] = None
+            pretty.log_title(f"INVOKE CYCLE {i}")
+            i += 1
+            # 处理工具调用
+            rprint(chat_resp)
+            if chat_resp.tool_calls:
+                for tool_call in chat_resp.tool_calls:
+                    target_mcp_client: MCPClient | None = None
                     for mcp_client in self.mcp_clients:
-                        if tool_call.function.name in [tool.name for tool in mcp_client.getTools()]:       
+                        if tool_call.function.name in [
+                            t.name for t in mcp_client.getTools()
+                        ]:
                             target_mcp_client = mcp_client
                             break
                     if target_mcp_client:
-                        pretty.log_title(f"TOOL USE '{tool_call.function.name}'")
-                        print("with arguments:", tool_call.function.arguments)
-                        mcp_result = await target_mcp_client.call_tool(tool_call.function.name, json.loads(tool_call.function.arguments))
-                        print("\nTOOL RESULT:", mcp_result)
-                        self.llm.append_tool_result(tool_call.id, mcp_result.model_dump_json())
+                        pretty.log_title(f"TOOL USE `{tool_call.function.name}`")
+                        rprint("with args:", tool_call.function.arguments)
+                        mcp_result = await target_mcp_client.call_tool(
+                            tool_call.function.name,
+                            json.loads(tool_call.function.arguments),
+                        )
+                        rprint("call result:", mcp_result)
+                        self.llm.append_tool_result(
+                            tool_call.id, mcp_result.model_dump_json()
+                        )
                     else:
                         self.llm.append_tool_result(tool_call.id, "tool not found")
-                response = await self.llm.chat()
+                chat_resp = await self.llm.chat()
             else:
-                # 没有工具调用，退出循环
-                break
-        
-        return response.content
+                return chat_resp.content
