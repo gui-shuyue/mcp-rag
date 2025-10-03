@@ -47,24 +47,24 @@ class AsyncChatOpenAI:
 
     def __post_init__(self):
         self.llm = AsyncOpenAI(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            base_url=os.getenv("OPENAI_API_BASE_URL"),
+            api_key=os.environ.get("OPENAI_API_KEY"),
+            base_url=os.environ.get("OPENAI_BASE_URL"),
         )
         if self.system_prompt:
             self.messages.insert(0, {"role": "system", "content": self.system_prompt})
         if self.context:
             self.messages.append({"role": "user", "content": self.context})
 
-    async def chat(self, prompt: str = "", print_llm_output: bool = True):
+    async def chat(self, prompt: str = "", print_llm_output: bool = True) -> ChatOpenAIChatResponse:
         pretty.log_title("CHAT")
         if prompt:
             self.messages.append({"role": "user", "content": prompt})       
-            streaming = await self.llm.chat.completions.create(             
-                model=self.model,
-                messages=self.messages,
-                tools=self.getToolsDefinitions(),
-                stream=True,
-            )
+        streaming = await self.llm.chat.completions.create(             
+            model=self.model,
+            messages=self.messages,
+            tools=self.getToolsDefinitions(),
+            stream=True,
+        )
 # # 典型 chunk 示例
 # {
 #     "id": "chatcmpl-...",
@@ -94,18 +94,18 @@ class AsyncChatOpenAI:
                 if print_llm_output:
                    print(delta.content, end="")
                    printed_llm_output = True
-            
+
             if delta.tool_calls:
-                for tool_call_chunk in delta.tool_calls:
-                    if len(tool_calls) <= tool_call_chunk.index:
+                for tool_call in delta.tool_calls:
+                    if len(tool_calls) <= tool_call.index:
                         tool_calls.append(ToolCall())
-                    current_call = tool_calls[tool_call_chunk.index]
-                    if tool_call_chunk.id:
-                        current_call.id = tool_call_chunk.id or ""
-                    if tool_call_chunk.function:
-                        current_call.function.name = tool_call_chunk.function.name or ""
-                        current_call.function.arguments = (tool_call_chunk.function.arguments or "")
-# # 典型 tool_call_chunk
+                    current_call = tool_calls[tool_call.index]
+                    if tool_call.id:
+                        current_call.id = tool_call.id or ""
+                    if tool_call.function:
+                        current_call.function.name = tool_call.function.name or ""
+                        current_call.function.arguments += (tool_call.function.arguments or "")
+# # 典型 tool_call
 # {
 #     "index": 0,
 #     "id": "call_123",
@@ -116,29 +116,40 @@ class AsyncChatOpenAI:
 # }
             
         
-            if printed_llm_output:
-                print()
-            self.messages.append(
+        if printed_llm_output:
+            print()
+        
+        # 修改后的代码：
+        message = {
+            "role": "assistant", 
+            "content": content,
+        }
+
+        # 🔧 只在有工具调用时才添加 tool_calls 字段
+        if tool_calls and len(tool_calls) > 0:
+            # 🔧 过滤掉空的工具调用
+            valid_tool_calls = [
                 {
-                    "role": "assistant", 
-                    "content": content,
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "id": tool.id,
-                            "function": {
-                                "name": tool.function.name,
-                                "arguments": tool.function.arguments,
-                            } ,
-                        }
-                        for tool in tool_calls
-                    ]
+                    "type": "function",
+                    "id": tool.id,
+                    "function": {
+                        "name": tool.function.name,
+                        "arguments": tool.function.arguments,
+                    }
                 }
-            )
-            return ChatOpenAIChatResponse(
-                content=content,
-                tool_calls=tool_calls,
-            )
+                for tool in tool_calls
+                if tool.id and tool.function.name  # 🔧 确保不为空
+            ]
+            
+            if valid_tool_calls:
+                message["tool_calls"] = valid_tool_calls
+
+        self.messages.append(message)
+        
+        return ChatOpenAIChatResponse(
+            content=content,
+            tool_calls=tool_calls,
+        )
     
     
     
@@ -147,13 +158,13 @@ class AsyncChatOpenAI:
         return [
             ChatCompletionToolParam(
                 type = "function",
-                parameters=FunctionDefinition(
+                function=FunctionDefinition(
                     name=tool.name,
-                    description=tool.description,
-                    parameters=tool.inputSchema,
+                    description=tool.description or "",
+                    parameters=tool.inputSchema or {},
                 ),
             )
-            for tool in self.tools
+            for tool in self.tools if tool.name and tool.name.strip()
         ]
     # ChatCompletionToolParam:
     # {
@@ -164,6 +175,15 @@ class AsyncChatOpenAI:
     #     "parameters": dict  # 参数定义（JSON Schema）
     # }
     # }
+
+    def append_tool_result(self, tool_call_id: str, tool_result: str):
+        self.messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": tool_result,
+            }
+        )
 
 async def example():
     llm = AsyncChatOpenAI(
